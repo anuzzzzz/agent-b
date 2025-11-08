@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+
+# Environment
+.env
+
+# Data
+data/screenshots/
+*.png
+
+# IDE
+.vscode/
+.DS_Store
+
+# Playwright
+playwright-report/
+```
+
+---
+
+## Step 9: Create `.env.example`
+```
+# API Keys (add your keys here, then save as .env)
+OPENAI_API_KEY=sk-SaVqsf8bVwWP9-WvFeMjWiiR8v-MEfVCIlxDlDUVc-T3BlbkFJRKvX2cohN81P3WSgyYt4I-zYOYEbCfVxxpkYyQwCQA
+ANTHROPIC_API_KEY=your_anthropic_key_here
+
+# Browser Settings
+HEADLESS=false  
