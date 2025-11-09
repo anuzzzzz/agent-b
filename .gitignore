@@ -18,15 +18,3 @@ data/screenshots/
 
 # Playwright
 playwright-report/
-```
-
----
-
-## Step 9: Create `.env.example`
-```
-# API Keys (add your keys here, then save as .env)
-OPENAI_API_KEY=
-ANTHROPIC_API_KEY=your_anthropic_key_here
-
-# Browser Settings
-HEADLESS=false  
