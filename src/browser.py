@@ -2,7 +2,7 @@ from playwright.sync_api import sync_playwright, Browser, Page, Playwright
 from pathlib import Path
 from typing import Optional
 import time
-
+from .state_detector import StateDetector
 
 from .config import HEADLESS, BROWSER_TIMEOUT, SCREENSHOTS_DIR
 
@@ -103,5 +103,9 @@ class BrowserAgent:
     def get_page_title(self) -> str:
         """Get current page title"""
         return self.page.title()
+    
+    def get_state_detector(self) -> StateDetector:
+        """Get a state detector for this page"""
+        return StateDetector(self.page)
 
 
