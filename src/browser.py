@@ -1,6 +1,6 @@
 from playwright.sync_api import sync_playwright, Browser, Page, Playwright
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict, Any
 import time
 from .state_detector import StateDetector
 
@@ -108,4 +108,44 @@ class BrowserAgent:
         """Get a state detector for this page"""
         return StateDetector(self.page)
 
+    def execute_action(self, action: Dict[str, Any]) -> bool:
+        """Execute a browser action based on action dictionary"""
+        action_type = action.get('action')
 
+        try:
+            if action_type == 'click':
+                selector = action.get('selector')
+                print(f"Executing: Click {selector}")
+                self.page.click(selector, timeout=10000)
+                self.wait(1000)
+                return True
+
+            elif action_type == 'fill':
+                selector = action.get('selector')
+                text = action.get('text', '')
+                print(f"Executing: Fill {selector} with '{text}'")
+                self.page.fill(selector, text, timeout=10000)
+                return True
+
+            elif action_type == 'wait':
+                milliseconds = action.get('milliseconds', 2000)
+                print(f"Executing: Wait {milliseconds}ms")
+                self.wait(milliseconds)
+                return True
+
+            elif action_type == 'screenshot':
+                description = action.get('description', 'state')
+                print(f"Executing: Screenshot - {description}")
+                return True
+
+            elif action_type == 'done':
+                print("Executing: Task complete")
+                return True
+
+            else:
+                print(f"Unknown action type: {action_type}")
+                return False
+
+        except Exception as e:
+            print(f"Failed to execute action: {e}")
+            return False
