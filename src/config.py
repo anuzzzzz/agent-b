@@ -26,4 +26,6 @@ APP_URLS = {
     "asana": "https://app.asana.com",
     "notion": "https://www.notion.so",
     "linear": "https://linear.app",
+    "wikipedia": "https://www.wikipedia.org",
+    "example": "https://example.com",
 }

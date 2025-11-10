@@ -27,10 +27,18 @@ Query: {query}
 
 Respond ONLY with valid JSON in this exact format:
 {{
-  "app": "asana|notion|linear|other",
+  "app": "asana|notion|linear|wikipedia|example|other",
   "task": "concise task description",
   "keywords": ["key", "words"]
-}}"""
+}}
+
+Common apps to recognize:
+- asana: Project management
+- notion: Note-taking and collaboration
+- linear: Issue tracking
+- wikipedia: Online encyclopedia
+- example: Example.com (for testing)
+- other: Generic/unknown apps"""
 
 INITIAL_NAVIGATION_PROMPT = """You are starting a new task. Analyze the screenshot and decide the FIRST action to take.
 
