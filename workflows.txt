@@ -1,0 +1,21 @@
+# Sample workflows for batch execution
+# Lines starting with # are ignored
+
+# Navigation tasks
+How do I search for artificial intelligence on Wikipedia?
+How do I navigate to the about page on Example.com?
+
+# Asana tasks (requires authentication)
+How do I create a new project in Asana?
+How do I add a task to a project in Asana?
+How do I filter tasks by assignee in Asana?
+
+# Linear tasks (requires authentication)  
+How do I create a new issue in Linear?
+How do I filter issues by status in Linear?
+How do I assign an issue to a team member in Linear?
+
+# Notion tasks (requires authentication)
+How do I create a new database in Notion?
+How do I add a filter to a database view in Notion?
+How do I create a new page in Notion?
