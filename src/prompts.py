@@ -40,6 +40,28 @@ CRITICAL RULES:
 - ALWAYS look at the numbered red boxes in the screenshot
 - Choose the element_id that matches what you want to interact with
 
+**HANDLING POPUPS, MODALS & ONBOARDING:**
+Web apps frequently show interruptions that block your task:
+- Onboarding tutorials ("Welcome!", "Get started", "Tour")
+- Cookie notices ("Accept cookies", "Got it")
+- Upgrade prompts ("Try Premium", "Upgrade now")
+- Tooltips and hints ("Learn more", "Dismiss")
+- Confirmation dialogs ("Are you sure?", "OK", "Cancel")
+
+**Dismissal Strategy:**
+1. **Identify if popup blocks your path**: Look at the screenshot - is there a centered overlay or modal covering the main content?
+2. **Common dismiss buttons**: "Got it", "OK", "Close", "Dismiss", "Skip", "No thanks", "Accept", "Continue", "X" button, "Later"
+3. **Priority**: If you see a blocking popup, dismiss it FIRST before continuing with your main task
+4. **Don't get distracted**: After dismissing, immediately return to your original task
+
+Example:
+{
+  "action": "click",
+  "element_id": 9,
+  "description": "Dismiss onboarding modal",
+  "reasoning": "Element [9] is 'Got it' button blocking the 'Create new issue' button I need"
+}
+
 **TASK COMPLETION CRITERIA:**
 - CREATE tasks: "done" when you see SUCCESS message OR new item appears in list
 - VIEW/BROWSE tasks: "done" when you reach the target page showing the LIST/GRID view
@@ -82,6 +104,8 @@ App: {app}
 Current URL: {url}
 
 Look at the screenshot and decide what to do first. Common first steps:
+- **CHECK FOR BLOCKING POPUPS FIRST**: Cookie notices, onboarding tours, welcome modals
+  * If you see "Got it", "Accept", "Close", "Skip" → Click to dismiss before proceeding
 - If you need to log in, look for login buttons or authentication
 - If you're already logged in, identify the main action button or navigation
 - Look for menus, buttons, or links related to your task
@@ -113,8 +137,16 @@ Current state:
 - Interactive elements: {element_count}
 
 Look at the screenshot carefully and decide what to do next. Consider:
-- Is there a modal or popup that needs to be handled?
-- What's the next logical step to move forward?
+- **FIRST PRIORITY**: Is there a blocking popup/modal/overlay? If YES, dismiss it before continuing!
+  * Look for: "Got it", "OK", "Close", "Dismiss", "Skip", "Accept", "Continue", "X" buttons
+  * Common blocking popups: onboarding tours, cookie notices, upgrade prompts, tutorials
+  * These often appear as centered overlays with semi-transparent backgrounds
+- **SECOND PRIORITY**: What's the next logical step to move forward with your actual task?
+
+**Popup Handling Examples:**
+- If you see "Got it" or "OK" button in center of screen → Click it to dismiss
+- If previous action failed with timeout → Check if popup is blocking the element
+- After dismissing popup → Immediately retry your intended action
 
 IMPORTANT - Task Completion Rules:
 
