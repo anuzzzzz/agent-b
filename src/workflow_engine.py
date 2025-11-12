@@ -4,11 +4,12 @@ from pathlib import Path
 import time
 import json
 
-from .browser import BrowserAgent
+from .browser import PersistentBrowserAgent as BrowserAgent
 from .llm_agent import LLMAgent
 from .state_detector import StateDetector
+from .som_annotator import SoMAnnotator
 from .utils import save_metadata
-from .config import APP_URLS, SCREENSHOTS_DIR
+from .config import SCREENSHOTS_DIR, APP_URLS
 
 try:
     from .auth_manager import AuthManager
@@ -26,20 +27,23 @@ class EnhancedWorkflowEngine:
         headless: bool = False,
         max_steps: int = 20,
         use_auth: bool = True,
+        use_session: bool = False,
         credentials_path: Optional[Path] = None
     ):
         """
         Initialize enhanced workflow engine
-        
+
         Args:
             headless: Run browser in headless mode
             max_steps: Maximum actions before stopping
             use_auth: Whether to attempt authentication
+            use_session: Whether to use saved browser sessions (for OAuth)
             credentials_path: Optional path to credentials JSON
         """
         self.headless = headless
         self.max_steps = max_steps
         self.use_auth = use_auth
+        self.use_session = use_session
         self.llm_agent = LLMAgent()
         self.auth_manager = AuthManager(credentials_path) if use_auth else None
         self.key_states = []  # Track important states
@@ -117,38 +121,38 @@ class EnhancedWorkflowEngine:
         step_count = 0
         consecutive_failures = 0
         max_failures = 3
-        
-        with BrowserAgent(headless=self.headless) as browser:
+
+        # Choose browser type based on session preference
+        # BrowserAgent is actually PersistentBrowserAgent - it always uses sessions
+        if self.use_session:
+            print(f"🔄 Using persistent session for {app}")
+            browser = BrowserAgent(
+                headless=self.headless,
+                session_name=app
+            )
+        else:
+            # Use default session for non-session workflows
+            browser = BrowserAgent(
+                headless=self.headless,
+                session_name="default"
+            )
+
+        with browser:
             # Step 0: Navigate to app
             print(f"\n📍 Step 0: Navigating to {app_url}")
             browser.goto(app_url)
             browser.wait(3000)
-            
-            # Handle authentication if needed
-            if self.use_auth and self.auth_manager:
-                if self.auth_manager.requires_auth(browser, app):
-                    print("\n🔐 Authentication required")
-                    
-                    # Take pre-auth screenshot
-                    pre_auth_screenshot = browser.take_screenshot(
-                        "00_pre_authentication",
-                        task_dir=task_dir
-                    )
-                    screenshots.append(pre_auth_screenshot)
-                    
-                    # Attempt login
-                    if self.auth_manager.login(browser, app):
-                        # Wait for app to load
-                        self.auth_manager.wait_for_app_load(browser, app)
-                        
-                        # Take post-auth screenshot
-                        post_auth_screenshot = browser.take_screenshot(
-                            "00_post_authentication",
-                            task_dir=task_dir
-                        )
-                        screenshots.append(post_auth_screenshot)
-                    else:
-                        print("⚠️  Authentication failed, continuing anyway...")
+
+            # Handle authentication - GENERALIZED (no app-specific logic)
+            if self.use_session:
+                # Using persistent session - trust that login was done via setup_login.py
+                print("✅ Using persistent session - assuming authenticated")
+                print(f"   (If login fails, run: python setup_login.py {app})")
+            elif self.use_auth:
+                # Not using session - remind user about session setup
+                print("\n⚠️  Running without --use-session flag")
+                print("   For OAuth/SSO apps, use --use-session after running setup_login.py")
+                print("   Continuing with current page state...")
             
             # Get state detector
             detector = browser.get_state_detector()
@@ -191,13 +195,30 @@ class EnhancedWorkflowEngine:
                         'state': state_info
                     })
                 
-                # 4. DECIDE: Ask LLM what to do next
+                # 4. SET-OF-MARKS (SoM): Extract elements and annotate screenshot
+                print(f"   🎯 Applying Set-of-Marks annotation...")
+
+                # Get interactive elements with positions
+                elements = detector.get_elements_with_positions(limit=100)
+                print(f"   Found {len(elements)} interactive elements")
+
+                # Annotate screenshot with numbered marks
+                annotator = SoMAnnotator()
+                annotated_screenshot, element_mapping = annotator.annotate_screenshot(
+                    screenshot_path,
+                    elements
+                )
+                print(f"   ✓ Screenshot annotated with {len(element_mapping)} marks")
+
+                # 5. DECIDE: Ask LLM what to do next (with annotated screenshot)
                 print(f"🤔 Deciding next action...")
                 action = self.llm_agent.decide_action(
                     task=task,
-                    screenshot_path=screenshot_path,
+                    screenshot_path=annotated_screenshot,  # Use annotated screenshot!
                     state_info=state_info,
-                    is_initial=(step_count == 1)
+                    is_initial=(step_count == 1),
+                    interactive_elements=None,  # Not needed, LLM uses element IDs
+                    element_mapping=element_mapping  # Pass mapping for context
                 )
                 
                 print(f"💡 Decision: {action['action']}")
@@ -221,7 +242,7 @@ class EnhancedWorkflowEngine:
                 
                 # 6. ACT: Execute the action
                 print(f"⚡ Executing: {action.get('description', action['action'])}")
-                success = browser.execute_action(action)
+                success = browser.execute_action(action, element_mapping=element_mapping)
                 
                 if not success:
                     consecutive_failures += 1
@@ -392,35 +413,20 @@ class EnhancedWorkflowEngine:
     
     def _detect_task_completion(
         self,
-        task: str,
-        current_state: Dict[str, Any],
+        task: str,  # Keep for interface compatibility
+        current_state: Dict[str, Any],  # Keep for interface compatibility
         actions_taken: List[Dict]
     ) -> bool:
-        """Detect if the task has been completed"""
-        # Check for explicit success indicators
-        if current_state.get('has_success_indicator'):
-            return True
-        
-        # Check task-specific completion patterns
-        task_lower = task.lower()
-        
-        if 'create' in task_lower:
-            # For creation tasks, look for success messages or new items
-            if any(word in current_state.get('visible_text_summary', '').lower() 
-                   for word in ['created', 'success', 'saved']):
-                return True
-        
-        if 'filter' in task_lower:
-            # For filter tasks, check if filters are applied
-            if 'filtered' in current_state.get('visible_text_summary', '').lower():
-                return True
-        
-        if 'navigate' in task_lower:
-            # For navigation tasks, check if we reached the target
-            recent_actions = actions_taken[-3:] if len(actions_taken) >= 3 else actions_taken
-            if any(action.get('action') == 'screenshot' for action in recent_actions):
-                return True
-        
+        """
+        Detect if the task has been completed.
+
+        GENERALIZATION: We do NOT hardcode task-specific completion logic.
+        The LLM is fully responsible for deciding when to return "done".
+        This method now always returns False - completion is LLM-driven only.
+
+        This maintains the interface but removes all hardcoded heuristics.
+        """
+        # Always return False - let the LLM decide completion via "done" action
         return False
     
     def _generate_state_name(self, state_info: Dict[str, Any]) -> str:
@@ -441,33 +447,31 @@ class EnhancedWorkflowEngine:
             return "state"
     
     def _get_app_url(self, app: str) -> str:
-        """Get URL for app with fallback logic"""
+        """
+        Get URL for app using smart heuristics for authenticated apps.
+
+        GENERALIZATION: Uses config for known apps, falls back to common patterns.
+        Prioritizes authenticated/app subdomains since we use persistent sessions.
+
+        Common patterns:
+        - app.{name}.com (Asana, etc.)
+        - {name}.app (Linear, etc.)
+        - www.{name}.so (Notion)
+        - www.{name}.com (generic fallback)
+        """
         app_lower = app.lower()
-        
-        # Check predefined URLs
-        if app_lower in APP_URLS:
-            return APP_URLS[app_lower]
-        
-        # Common patterns
-        url_patterns = {
-            'notion': 'https://www.notion.so',
-            'linear': 'https://linear.app',
-            'asana': 'https://app.asana.com',
-            'github': 'https://github.com',
-            'jira': 'https://www.atlassian.com/software/jira',
-            'slack': 'https://slack.com',
-            'figma': 'https://www.figma.com',
-        }
-        
-        if app_lower in url_patterns:
-            return url_patterns[app_lower]
-        
-        # Fallback to common patterns
+
+        # Special case: "other" means example.com for testing
         if app_lower == "other":
             return "https://example.com"
-        
-        # Try common URL patterns
-        return f"https://www.{app_lower}.com"
+
+        # Use configured URL if available
+        if app_lower in APP_URLS:
+            return APP_URLS[app_lower]
+
+        # Fallback to authenticated app subdomain (most common for SaaS apps)
+        # This works better with persistent sessions
+        return f"https://app.{app_lower}.com"
     
     def _create_task_directory(self, app: str, task: str) -> Path:
         """Create organized directory structure"""

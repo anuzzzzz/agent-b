@@ -12,6 +12,9 @@ env/
 data/screenshots/
 *.png
 
+# Browser sessions (contains auth cookies/tokens)
+browser_sessions/
+
 # IDE
 .vscode/
 .DS_Store

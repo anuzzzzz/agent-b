@@ -101,40 +101,76 @@ class AuthManager:
     def requires_auth(self, browser: BrowserAgent, app: str) -> bool:
         """
         Check if the current page requires authentication
-        
+
         Args:
             browser: Browser instance
             app: App name
-            
+
         Returns:
             True if login is required
         """
         current_url = browser.page.url
-        page_content = browser.page.content().lower()
-        
-        # Check for common login indicators
-        login_indicators = [
-            'login', 'sign in', 'signin', 'log in',
-            'authenticate', 'password', 'email'
-        ]
-        
-        # Check URL
-        if any(indicator in current_url.lower() for indicator in login_indicators):
+
+        # App-specific authentication detection
+        app = app.lower()
+
+        if app == 'asana':
+            # Asana: check if we're on login page or workspace selection
+            if '-/login' in current_url or 'auth' in current_url:
+                return True
+            # Check if we can see the main app interface
+            try:
+                # Look for Asana's main topbar (indicates logged in)
+                topbar = browser.page.locator('div[class*="TopbarStructure"], div[class*="Topbar"]').first
+                if topbar.is_visible(timeout=2000):
+                    return False  # Already logged in
+            except:
+                pass
+
+        elif app == 'linear':
+            # Linear: check URL and main navigation
+            if '/login' in current_url or 'auth' in current_url:
+                return True
+            try:
+                nav = browser.page.locator('nav[class*="navigation"]').first
+                if nav.is_visible(timeout=2000):
+                    return False
+            except:
+                pass
+
+        elif app == 'notion':
+            # Notion: check URL and sidebar
+            if '/login' in current_url or 'auth' in current_url:
+                return True
+            try:
+                sidebar = browser.page.locator('div[class*="sidebar"]').first
+                if sidebar.is_visible(timeout=2000):
+                    return False
+            except:
+                pass
+
+        # Generic checks - only if app-specific checks didn't determine
+        # Check URL for explicit login paths
+        login_url_patterns = ['/login', '/signin', '/auth/login', '/-/login']
+        if any(pattern in current_url.lower() for pattern in login_url_patterns):
             return True
-        
-        # Check page title
+
+        # Check page title for login indicators
         title = browser.page.title().lower()
-        if any(indicator in title for indicator in login_indicators):
+        if title.startswith('log in') or title.startswith('sign in'):
             return True
-        
-        # Check for password fields (strong indicator)
+
+        # Check for visible password fields (strong indicator, but be careful)
         try:
             password_field = browser.page.locator('input[type="password"]').first
-            if password_field.is_visible():
-                return True
+            if password_field.is_visible(timeout=1000):
+                # Make sure it's actually a login form, not a settings page
+                page_text = browser.page.locator('body').inner_text().lower()
+                if 'log in' in page_text or 'sign in' in page_text:
+                    return True
         except:
             pass
-        
+
         return False
     
     def login(self, browser: BrowserAgent, app: str) -> bool:
@@ -320,12 +356,23 @@ class AuthManager:
             print("   Submitting...")
             submit_button = browser.page.locator(config['selectors']['submit']).first
             submit_button.click()
-            
-            # Wait for navigation
-            browser.wait(7000)
-            
-            print("✅ Asana login successful!")
-            return True
+
+            # Wait for navigation and app to load
+            print("   Waiting for Asana to load...")
+            browser.wait(5000)
+
+            # Wait for Asana's main interface to appear
+            try:
+                browser.page.wait_for_selector(
+                    'div[class*="TopbarStructure"], div[class*="Topbar"]',
+                    timeout=15000
+                )
+                print("✅ Asana login successful!")
+                return True
+            except:
+                print("⚠️  Asana login may have succeeded, but couldn't confirm")
+                browser.wait(5000)  # Extra wait just in case
+                return True
             
         except Exception as e:
             print(f"   Asana login error: {e}")

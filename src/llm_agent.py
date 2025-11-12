@@ -72,9 +72,11 @@ class LLMAgent:
         task: str,
         screenshot_path: Path,
         state_info: Dict[str, Any],
-        is_initial: bool = False
+        is_initial: bool = False,
+        interactive_elements: List[Dict[str, Any]] = None,
+        element_mapping: Dict[int, Dict] = None
     ) -> Dict[str, Any]:
-        """Decide next action based on screenshot and state"""
+        """Decide next action based on screenshot, state, and available elements"""
         print(f"\nDeciding next action for: {task}")
 
         with open(screenshot_path, 'rb') as f:
@@ -85,12 +87,29 @@ class LLMAgent:
             for i, action in enumerate(self.action_history[-5:])
         ]) or "None yet (this is the first action)"
 
+        # SoM: Build element list from mapping
+        element_list_str = ""
+        if element_mapping:
+            lines = ["Available elements (numbered in screenshot):"]
+            for elem_id, elem_data in element_mapping.items():
+                text = elem_data.get('text', '')[:50]
+                role = elem_data.get('role', 'element')
+                aria = elem_data.get('ariaLabel', '')[:30]
+
+                if text:
+                    lines.append(f"  [{elem_id}] {role}: \"{text}\"")
+                elif aria:
+                    lines.append(f"  [{elem_id}] {role}: \"{aria}\"")
+                else:
+                    lines.append(f"  [{elem_id}] {role}")
+            element_list_str = "\n" + "\n".join(lines)
+
         if is_initial:
             prompt = INITIAL_NAVIGATION_PROMPT.format(
                 task=task,
                 app=state_info.get('app', 'unknown'),
                 url=state_info.get('url', 'unknown'),
-            )
+            ) + element_list_str
         else:
             prompt = ACTION_DECISION_PROMPT.format(
                 task=task,
@@ -100,7 +119,7 @@ class LLMAgent:
                 has_modal=state_info.get('has_modal', False),
                 has_dropdown=state_info.get('has_dropdown', False),
                 element_count=state_info.get('element_count', 0),
-            )
+            ) + element_list_str
 
         messages = [
             SystemMessage(content=SYSTEM_PROMPT),
