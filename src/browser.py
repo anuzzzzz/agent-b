@@ -646,7 +646,31 @@ class PersistentBrowserAgent:
 
                     if not locator_str:
                         print(f"   ✗ Could not find element [{element_id}]")
-                        return False
+                        print(f"   → Attempting direct keyboard input as fallback...")
+
+                        # FALLBACK: If there's a focused field, just type into it
+                        has_focused = self.page.evaluate('''
+                            () => {
+                                const focused = document.activeElement;
+                                return focused && (
+                                    focused.contentEditable === 'true' ||
+                                    focused.contentEditable === 'plaintext-only' ||
+                                    focused.tagName === 'INPUT' ||
+                                    focused.tagName === 'TEXTAREA'
+                                );
+                            }
+                        ''')
+
+                        if has_focused:
+                            print(f"   ✓ Found focused field, typing directly: '{text}'")
+                            self.page.keyboard.type(text)
+                            self.wait(500)
+                            self.last_filled_element = None
+                            print(f"   ✓ Direct keyboard input successful")
+                            return True
+                        else:
+                            print(f"   ✗ No focused field available for direct input")
+                            return False
 
                 else:
                     # Fallback: Visual-first approach
