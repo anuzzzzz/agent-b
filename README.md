@@ -83,4 +83,4 @@ Each workflow run generates:
 
 ---
 
-Built for Softlight Engineering's Agent B take-home assignment.
+
