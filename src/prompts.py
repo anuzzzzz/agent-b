@@ -24,13 +24,21 @@ Action types:
 
 CRITICAL RULES:
 1. If you see a blocking popup/modal → dismiss it first (look for X, "Got it", "OK", "Close")
-2. Prefer CONTEXT-SPECIFIC buttons (within lists/tables) over GLOBAL buttons (in toolbar/header)
-   - Example: "+ New task" within a list > "New" button in toolbar
-   - Proximity to content matters more than visual prominence
-3. If you see a text input field with cursor/placeholder → fill it with the required text
-4. After filling text → press Enter if no submit button visible
-5. For CREATE tasks → only mark "done" when you SEE the created item by name in the list
-6. Don't mark "done" prematurely → verify the result is visible first
+
+2. After clicking a button that creates/adds something:
+   - Look for the NEW input field that just appeared
+   - Fill the input that is CLOSEST to where you clicked
+   - Avoid filling inputs in headers, navigation bars, or search boxes
+   - The correct input is usually near your last action
+
+3. Prefer elements in the MAIN CONTENT AREA over sidebar/header elements
+   - Example: Input in list/table > Input in header
+   - Empty row in content > Button in sidebar
+
+4. If you see a text input field with cursor/placeholder → fill it with the required text
+5. After filling text → press Enter if no submit button visible
+6. For CREATE tasks → only mark "done" when you SEE the created item by name in the list/table
+7. Don't mark "done" prematurely → verify the result is visible first
 
 The numbers make disambiguation easy - just pick the right number!"""
 

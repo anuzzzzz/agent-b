@@ -2,6 +2,12 @@
 
 A visual grounding approach to web automation that works across any web application without hardcoding.
 
+## Demo Video
+
+**Watch the live demo**: [Loom Video](https://drive.google.com/file/d/1DNS_4GyoscAZgsndr6fHIzYAp8paDWbL/view?usp=sharing)
+
+The video demonstrates Agent B automating tasks across Asana, Linear, and Notion in real-time.
+
 ## What It Does
 
 Agent B automates web tasks by "seeing" the interface like a human would - using numbered visual markers on interactive elements. Instead of brittle CSS selectors or XPath, it uses a vision-language model to understand what's on screen and decide what to click next.
