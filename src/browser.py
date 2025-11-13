@@ -512,19 +512,61 @@ class PersistentBrowserAgent:
                     element.click(timeout=10000)
                     self.wait(1000)
 
-                    # After click, check for new empty contenteditable fields and scroll them into view
+                    # After click, check for new empty contenteditable fields - ATOMIC APPROACH
                     try:
-                        # Find all contenteditable elements
-                        all_editables = self.page.locator('[contenteditable]').all()
-                        # Filter for empty ones (no text content)
-                        empty_fields = [e for e in all_editables if not e.text_content().strip()]
-                        if empty_fields:
-                            # Scroll the first empty contenteditable into view and focus it
-                            empty_fields[0].scroll_into_view_if_needed()
-                            empty_fields[0].click()  # Click to focus it
-                            print(f"   → Scrolled and focused empty contenteditable field")
+                        # Use JavaScript to find, focus, and scroll in ONE atomic operation
+                        # This prevents position mismatch issues with Notion's dynamic fields
+                        found_and_focused = self.page.evaluate('''
+                            () => {
+                                // Strategy 1: Check if there's already a focused editable
+                                const focused = document.activeElement;
+                                if (focused && (
+                                    focused.contentEditable === 'true' ||
+                                    focused.contentEditable === 'plaintext-only' ||
+                                    focused.tagName === 'INPUT' ||
+                                    focused.tagName === 'TEXTAREA'
+                                )) {
+                                    focused.scrollIntoView({behavior: 'instant', block: 'center'});
+                                    return 'focused_existing';
+                                }
+
+                                // Strategy 2: Find empty contenteditable fields
+                                const editables = document.querySelectorAll('[contenteditable="true"], [contenteditable="plaintext-only"]');
+
+                                for (let elem of editables) {
+                                    const text = elem.textContent || '';
+                                    const isEmpty = text.trim() === '' ||
+                                                   text.includes('Type a name') ||
+                                                   text.includes('Type here') ||
+                                                   text.includes('Enter text');
+
+                                    const rect = elem.getBoundingClientRect();
+                                    const isVisible = rect.width > 0 && rect.height > 0;
+
+                                    if (isEmpty && isVisible) {
+                                        elem.focus();
+                                        elem.scrollIntoView({behavior: 'instant', block: 'center'});
+
+                                        // Clear placeholder text
+                                        if (text.includes('Type') || text.includes('Enter')) {
+                                            elem.textContent = '';
+                                        }
+
+                                        return 'found_empty';
+                                    }
+                                }
+
+                                return 'not_found';
+                            }
+                        ''')
+
+                        if found_and_focused == 'focused_existing':
+                            print(f"   → Found already-focused input field")
+                        elif found_and_focused == 'found_empty':
+                            print(f"   → Found and focused empty contenteditable field")
+
                     except Exception as e:
-                        print(f"   ⚠️  Failed to scroll new field: {str(e)[:50]}")
+                        print(f"   ⚠️  Failed to handle new field: {str(e)[:50]}")
 
                     # Verify the click had an effect
                     after_state = detector.get_dom_snapshot()
