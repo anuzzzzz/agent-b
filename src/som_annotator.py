@@ -52,6 +52,7 @@ class SoMAnnotator:
         element_mapping = {}
 
         # Annotate each element
+        label_id = 0  # Separate counter for visual labels
         for idx, elem in enumerate(elements, start=1):
             pos = elem.get('position', {})
             x = pos.get('x', 0)
@@ -63,12 +64,15 @@ class SoMAnnotator:
             if width <= 0 or height <= 0:
                 continue
 
+            # Increment label counter only for valid elements
+            label_id += 1
+
             # Draw bounding box around element
             box_coords = [x, y, x + width, y + height]
             draw.rectangle(box_coords, outline=self.box_color, width=2)
 
             # Draw numbered label
-            label = str(idx)
+            label = str(label_id)
 
             # Create a background box for the number
             # Get text size (approximate for default font)
@@ -95,8 +99,8 @@ class SoMAnnotator:
                 font=font
             )
 
-            # Store in mapping
-            element_mapping[idx] = {
+            # Store in mapping using label_id (not idx)
+            element_mapping[label_id] = {
                 'text': elem.get('text', ''),
                 'role': elem.get('role', ''),
                 'type': elem.get('type', ''),

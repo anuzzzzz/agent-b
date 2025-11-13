@@ -244,7 +244,7 @@ class StateDetector:
                     'select',
                     '[role="menuitem"]',
                     '[role="tab"]',
-                    '[contenteditable="true"]'
+                    '[contenteditable]'  // Match ANY contenteditable value
                 ];
 
                 for (const selector of selectors) {
@@ -357,7 +357,7 @@ class StateDetector:
                     'input[type="search"]',
                     'textarea',
                     'select',
-                    '[contenteditable="true"]',
+                    '[contenteditable]',  // Match ANY contenteditable value
                     'button',
                     '[role="button"]',
                     '[role="menuitem"]',
@@ -446,7 +446,7 @@ class StateDetector:
                     'button', '[role="button"]', 'a',
                     'input', 'textarea', 'select',
                     '[role="menuitem"]', '[role="tab"]',
-                    '[contenteditable="true"]'
+                    '[contenteditable]'  // Match ANY contenteditable (true, plaintext-only, etc.)
                 ];
 
                 const allElements = [];
@@ -463,8 +463,8 @@ class StateDetector:
                     const rect = el.getBoundingClientRect();
                     const text = getTextContent(el);
 
-                    // Skip elements with no text (unless input/textarea)
-                    if (!text && el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA') continue;
+                    // Skip elements with no text (unless input/textarea/contenteditable)
+                    if (!text && el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA' && !el.hasAttribute('contenteditable')) continue;
 
                     elements.push({
                         text: text,

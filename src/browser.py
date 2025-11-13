@@ -83,8 +83,10 @@ class PersistentBrowserAgent:
             self.context = self.playwright.chromium.launch_persistent_context(
                 user_data_dir=str(self.session_dir),
                 headless=self.headless,
-                # Simplified settings to avoid crashes
-                viewport={'width': 1920, 'height': 1080},
+                # Larger viewport for better web app compatibility
+                viewport={'width': 1920, 'height': 1200},
+                # Set device scale factor for retina/high-DPI displays
+                device_scale_factor=1,
                 # Removed problematic settings that may cause crashes
                 slow_mo=50,  # Add slight delay to help with stability
             )
@@ -178,21 +180,28 @@ class PersistentBrowserAgent:
         print("✅ Page loaded!")
 
     def take_screenshot(self, name: str, task_dir: Optional[Path] = None) -> Path:
-        """Take a screenshot and save it"""
+        """
+        Take a screenshot and save it
+
+        Uses viewport-sized screenshots instead of full_page to avoid layout issues
+        and ensure consistent capture area for the LLM
+        """
         if task_dir:
             save_dir = SCREENSHOTS_DIR / task_dir
             save_dir.mkdir(parents=True, exist_ok=True)
         else:
             save_dir = SCREENSHOTS_DIR
-            
+
         timestamp = int(time.time())
         filename = f"{name}_{timestamp}.png"
         filepath = save_dir / filename
-        
+
         print(f"📸 Taking screenshot: {filename}")
-        self.page.screenshot(path=str(filepath), full_page=True)
+        # Use full_page=False for consistent viewport capture
+        # This avoids oddly shaped screenshots and matches what user sees
+        self.page.screenshot(path=str(filepath), full_page=False)
         print(f"✅ Screenshot saved: {filepath}")
-        
+
         return filepath
     
     def click(self, selector: str):
@@ -229,6 +238,85 @@ class PersistentBrowserAgent:
     def get_state_detector(self) -> StateDetector:
         """Get a state detector for this page"""
         return StateDetector(self.page)
+
+    def dismiss_promotional_modals(self) -> bool:
+        """
+        Attempt to dismiss promotional/onboarding modals that block interaction.
+
+        These are NOT critical modals (like confirmations), but rather:
+        - Product tours
+        - Feature announcements
+        - Promotional popups
+        - Cookie notices
+
+        Returns:
+            True if a modal was dismissed, False otherwise
+        """
+        try:
+            dismissed = self.page.evaluate("""
+                () => {
+                    // Common patterns for close buttons in promotional modals
+                    const closeSelectors = [
+                        '[aria-label*="close" i]',
+                        '[aria-label*="dismiss" i]',
+                        '[data-testid*="close"]',
+                        '[data-testid*="dismiss"]',
+                        'button[class*="close"]',
+                        'button[class*="dismiss"]',
+                        '.modal button:has-text("×")',
+                        '.modal button:has-text("Close")',
+                        '[role="dialog"] button[aria-label*="close" i]',
+                        // Notion-specific patterns
+                        '[class*="notion"] button:has-text("×")',
+                        '[class*="notion"] [aria-label*="close" i]',
+                    ];
+
+                    for (const selector of closeSelectors) {
+                        try {
+                            const buttons = document.querySelectorAll(selector);
+                            for (const btn of buttons) {
+                                const style = window.getComputedStyle(btn);
+                                if (style.display !== 'none' && style.visibility !== 'hidden') {
+                                    // Check if button is in a modal/overlay
+                                    let parent = btn.parentElement;
+                                    let inModal = false;
+                                    for (let i = 0; i < 10 && parent; i++) {
+                                        const classes = parent.className?.toLowerCase() || '';
+                                        const role = parent.getAttribute('role');
+                                        if (classes.includes('modal') ||
+                                            classes.includes('dialog') ||
+                                            classes.includes('overlay') ||
+                                            classes.includes('popup') ||
+                                            role === 'dialog') {
+                                            inModal = true;
+                                            break;
+                                        }
+                                        parent = parent.parentElement;
+                                    }
+
+                                    if (inModal) {
+                                        btn.click();
+                                        return true;
+                                    }
+                                }
+                            }
+                        } catch (e) {
+                            // Selector might not be valid, continue
+                        }
+                    }
+                    return false;
+                }
+            """)
+
+            if dismissed:
+                print("   ✓ Dismissed promotional modal")
+                self.wait(1000)  # Wait for modal to close
+                return True
+            return False
+
+        except Exception as e:
+            print(f"   ⚠️  Modal dismissal attempt failed: {e}")
+            return False
 
     def find_element_by_visual_description(self, target_text: str, target_description: str = "") -> Optional[str]:
         """
@@ -417,10 +505,43 @@ class PersistentBrowserAgent:
                     else:
                         element = self.page.locator(locator_str).first
 
+                    # Get state before click for verification
+                    detector = self.get_state_detector()
+                    before_state = detector.get_dom_snapshot()
+
                     element.click(timeout=10000)
                     self.wait(1000)
-                    print(f"   ✓ Click successful")
-                    return True
+
+                    # After click, check for new empty contenteditable fields and scroll them into view
+                    try:
+                        # Find all contenteditable elements
+                        all_editables = self.page.locator('[contenteditable]').all()
+                        # Filter for empty ones (no text content)
+                        empty_fields = [e for e in all_editables if not e.text_content().strip()]
+                        if empty_fields:
+                            # Scroll the first empty contenteditable into view and focus it
+                            empty_fields[0].scroll_into_view_if_needed()
+                            empty_fields[0].click()  # Click to focus it
+                            print(f"   → Scrolled and focused empty contenteditable field")
+                    except Exception as e:
+                        print(f"   ⚠️  Failed to scroll new field: {str(e)[:50]}")
+
+                    # Verify the click had an effect
+                    after_state = detector.get_dom_snapshot()
+                    state_changed = (
+                        before_state['url'] != after_state['url'] or
+                        before_state['modal_count'] != after_state['modal_count'] or
+                        abs(before_state['element_count'] - after_state['element_count']) > 5
+                    )
+
+                    if state_changed:
+                        print(f"   ✓ Click successful (state changed)")
+                        return True
+                    else:
+                        print(f"   ⚠️  Click executed but no state change detected")
+                        # Still return True since click didn't throw error
+                        # The LLM will see no progress and try a different approach
+                        return True
                 except Exception as click_error:
                     print(f"   ✗ Click failed: {str(click_error)[:100]}")
                     return False
@@ -515,11 +636,44 @@ class PersistentBrowserAgent:
                     else:
                         element = self.page.locator(locator_str).first
 
+                    # Special handling: if element isn't fillable, try to find contenteditable child
+                    try:
+                        # Test if element is fillable
+                        is_fillable = element.evaluate('el => el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.hasAttribute("contenteditable")')
+                        if not is_fillable:
+                            # Try to find contenteditable child
+                            contenteditable = element.locator('[contenteditable]').first
+                            if contenteditable.count() > 0:
+                                element = contenteditable
+                                print(f"   → Found contenteditable child")
+                    except:
+                        pass
+
                     element.fill(text, timeout=10000)
+                    # Store the filled element for potential Enter key press
+                    self.last_filled_element = element
                     print(f"   ✓ Fill successful")
                     return True
                 except Exception as fill_error:
                     print(f"   ✗ Fill failed: {str(fill_error)[:100]}")
+                    return False
+
+            elif action_type == 'press_key':
+                key = action.get('key', 'Enter')
+                print(f"Executing: Press key '{key}'")
+                try:
+                    # If Enter and we have a last filled element, press it on that element
+                    if key == 'Enter' and hasattr(self, 'last_filled_element') and self.last_filled_element:
+                        print(f"   Pressing Enter on last filled element")
+                        self.last_filled_element.press(key)
+                    else:
+                        # Otherwise send to page globally
+                        self.page.keyboard.press(key)
+                    self.wait(1000)
+                    print(f"   ✓ Key press successful")
+                    return True
+                except Exception as key_error:
+                    print(f"   ✗ Key press failed: {str(key_error)[:100]}")
                     return False
 
             elif action_type == 'wait':

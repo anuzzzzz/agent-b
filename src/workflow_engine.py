@@ -25,7 +25,7 @@ class EnhancedWorkflowEngine:
     def __init__(
         self,
         headless: bool = False,
-        max_steps: int = 20,
+        max_steps: int = 10,
         use_auth: bool = True,
         use_session: bool = False,
         credentials_path: Optional[Path] = None
@@ -121,6 +121,8 @@ class EnhancedWorkflowEngine:
         step_count = 0
         consecutive_failures = 0
         max_failures = 3
+        repeated_action_count = 0  # Track same action attempts
+        last_action_signature = None  # Track what action was attempted
 
         # Choose browser type based on session preference
         # BrowserAgent is actually PersistentBrowserAgent - it always uses sessions
@@ -153,7 +155,11 @@ class EnhancedWorkflowEngine:
                 print("\n⚠️  Running without --use-session flag")
                 print("   For OAuth/SSO apps, use --use-session after running setup_login.py")
                 print("   Continuing with current page state...")
-            
+
+            # Dismiss any promotional modals that might block interaction
+            print("🧹 Checking for promotional modals...")
+            browser.dismiss_promotional_modals()
+
             # Get state detector
             detector = browser.get_state_detector()
             
@@ -164,7 +170,13 @@ class EnhancedWorkflowEngine:
                 print(f"\n{'─'*80}")
                 print(f"🔄 Step {step_count}/{self.max_steps}")
                 print(f"{'─'*80}")
-                
+
+                # 0. Check for and dismiss promotional modals
+                if detector.detect_modal():
+                    print("🧹 Modal detected, attempting to dismiss...")
+                    browser.dismiss_promotional_modals()
+                    browser.wait(1000)
+
                 # 1. OBSERVE: Capture current state
                 state_info = self._capture_enhanced_state(browser, detector, app)
                 state_info['step'] = step_count
@@ -174,19 +186,24 @@ class EnhancedWorkflowEngine:
                 print(f"   Title: {state_info['title'][:60]}...")
                 print(f"   Elements: {state_info['element_count']}")
                 print(f"   Interactive: {state_info.get('interactive_elements', 'N/A')}")
-                
-                # 2. CAPTURE: Take screenshot
+
+                # 2. SET-OF-MARKS (SoM): Extract elements FIRST (before screenshot)
+                print(f"   🎯 Extracting interactive elements...")
+                elements = detector.get_elements_with_positions(limit=100)
+                print(f"   Found {len(elements)} interactive elements")
+
+                # 3. CAPTURE: Take screenshot (after elements extracted, same DOM state)
                 screenshot_name = f"{step_count:02d}_{self._generate_state_name(state_info)}"
                 screenshot_path = browser.take_screenshot(
                     screenshot_name,
                     task_dir=task_dir
                 )
                 screenshots.append(screenshot_path)
-                
+
                 # Save metadata
                 save_metadata(screenshot_path, state_info, task=task)
-                
-                # 3. CHECK FOR KEY STATE
+
+                # 4. CHECK FOR KEY STATE
                 if self._is_key_state(state_info, task):
                     print("🌟 Key state detected!")
                     key_states.append({
@@ -194,13 +211,9 @@ class EnhancedWorkflowEngine:
                         'screenshot': screenshot_path,
                         'state': state_info
                     })
-                
-                # 4. SET-OF-MARKS (SoM): Extract elements and annotate screenshot
-                print(f"   🎯 Applying Set-of-Marks annotation...")
 
-                # Get interactive elements with positions
-                elements = detector.get_elements_with_positions(limit=100)
-                print(f"   Found {len(elements)} interactive elements")
+                # 5. ANNOTATE: Add numbered marks to screenshot
+                print(f"   📍 Annotating screenshot with marks...")
 
                 # Annotate screenshot with numbered marks
                 annotator = SoMAnnotator()
@@ -229,25 +242,96 @@ class EnhancedWorkflowEngine:
                 
                 # 5. CHECK COMPLETION
                 if action['action'] == 'done' or self._detect_task_completion(task, state_info, actions_taken):
-                    print("✅ Task completed successfully!")
-                    return {
-                        'status': 'completed',
-                        'step_count': step_count,
-                        'screenshot_count': len(screenshots),
-                        'screenshots': screenshots,
-                        'actions': actions_taken,
-                        'key_states': key_states,
-                        'task_dir': task_dir,
-                    }
+                    # VERIFICATION: For CREATE tasks, verify the item actually exists
+                    if 'create' in task.lower():
+                        # Extract what was supposed to be created from fill actions
+                        created_items = [a.get('text') for a in actions_taken if a.get('action') == 'fill' and a.get('text')]
+
+                        if created_items:
+                            # Check if any of these items appear in the current page text
+                            page_text = browser.page.text_content('body').lower()
+                            verified = any(item.lower() in page_text for item in created_items if item)
+
+                            if not verified:
+                                print(f"⚠️  Verification failed: Created items {created_items} not found in page")
+
+                                # AUTO-RECOVERY: Check if last action was 'fill' and we haven't tried Enter yet
+                                last_fill_action = next((a for a in reversed(actions_taken) if a.get('action') == 'fill'), None)
+                                has_pressed_enter = any(a.get('action') == 'press_key' and a.get('key') == 'Enter'
+                                                       for a in actions_taken)
+
+                                if last_fill_action and not has_pressed_enter:
+                                    print(f"   💡 Auto-recovery: Pressing Enter to submit filled text")
+                                    # Inject Enter press action
+                                    enter_action = {
+                                        'action': 'press_key',
+                                        'key': 'Enter',
+                                        'description': 'Auto-submit form with Enter key',
+                                        'reasoning': 'No submit button found after fill - trying Enter key'
+                                    }
+                                    success = browser.execute_action(enter_action)
+                                    actions_taken.append(enter_action)
+
+                                    if success:
+                                        print(f"   ✓ Enter key pressed - continuing to verify")
+                                        # Continue to next iteration to verify again
+                                    else:
+                                        print(f"   ✗ Enter key failed - continuing workflow")
+                                else:
+                                    print(f"   Continuing workflow - LLM may need to try a different approach")
+                                # Don't mark as done - continue to next step
+                            else:
+                                print(f"✅ Verification passed: Found {created_items} in page")
+                                print("✅ Task completed successfully!")
+                                return {
+                                    'status': 'completed',
+                                    'step_count': step_count,
+                                    'screenshot_count': len(screenshots),
+                                    'screenshots': screenshots,
+                                    'actions': actions_taken,
+                                    'key_states': key_states,
+                                    'task_dir': task_dir,
+                                }
+                        else:
+                            # No fill actions found, just trust the LLM
+                            print("✅ Task completed successfully!")
+                            return {
+                                'status': 'completed',
+                                'step_count': step_count,
+                                'screenshot_count': len(screenshots),
+                                'screenshots': screenshots,
+                                'actions': actions_taken,
+                                'key_states': key_states,
+                                'task_dir': task_dir,
+                            }
+                    else:
+                        # Non-CREATE tasks - trust the LLM
+                        print("✅ Task completed successfully!")
+                        return {
+                            'status': 'completed',
+                            'step_count': step_count,
+                            'screenshot_count': len(screenshots),
+                            'screenshots': screenshots,
+                            'actions': actions_taken,
+                            'key_states': key_states,
+                            'task_dir': task_dir,
+                        }
                 
                 # 6. ACT: Execute the action
                 print(f"⚡ Executing: {action.get('description', action['action'])}")
+
+                # Create signature for this action to detect repetition
+                action_signature = f"{action['action']}_{action.get('element_id', action.get('target_text', ''))}"
+
                 success = browser.execute_action(action, element_mapping=element_mapping)
-                
+
+                # Wait for page to stabilize after action (animations, DOM updates)
+                browser.wait(1500)
+
                 if not success:
                     consecutive_failures += 1
                     print(f"⚠️  Action failed ({consecutive_failures}/{max_failures})")
-                    
+
                     if consecutive_failures >= max_failures:
                         print("❌ Too many consecutive failures")
                         return {
@@ -262,6 +346,18 @@ class EnhancedWorkflowEngine:
                         }
                 else:
                     consecutive_failures = 0  # Reset on success
+
+                # 7. CHECK FOR STUCK STATE (same action repeated without progress)
+                if action_signature == last_action_signature:
+                    repeated_action_count += 1
+                    if repeated_action_count >= 3:
+                        print(f"⚠️  Stuck: Same action repeated {repeated_action_count} times without progress")
+                        print(f"   Suggesting LLM try alternative approach...")
+                        # Add a hint in the state for the LLM to see
+                        state_info['stuck_warning'] = f"Previous action (element {action.get('element_id')}) repeated {repeated_action_count}x with no progress. Try different element or approach."
+                else:
+                    repeated_action_count = 1
+                    last_action_signature = action_signature
                 
                 # Wait for state to settle
                 browser.wait(2000)
